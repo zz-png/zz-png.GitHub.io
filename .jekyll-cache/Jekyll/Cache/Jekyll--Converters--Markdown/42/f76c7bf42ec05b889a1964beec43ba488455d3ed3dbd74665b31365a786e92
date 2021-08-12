@@ -1,0 +1,42 @@
+I"�<p>直接放方法PS：kotlin中称为function（函数）吧，不管哈哈哈，java是世界上最好的语言，但是还是练习下kotlin。</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">fun</span> <span class="nf">suCmd</span><span class="p">(</span><span class="n">cmd</span><span class="p">:</span> <span class="nc">String</span><span class="p">):</span> <span class="nc">String</span> <span class="p">{</span>
+        <span class="kd">var</span> <span class="py">process</span><span class="p">:</span> <span class="nc">Process</span><span class="p">?</span> <span class="p">=</span> <span class="k">null</span>
+        <span class="kd">var</span> <span class="py">os</span><span class="p">:</span> <span class="nc">DataOutputStream</span><span class="p">?</span> <span class="p">=</span> <span class="k">null</span>
+        <span class="kd">var</span> <span class="py">ls</span><span class="p">:</span> <span class="nc">DataInputStream</span><span class="p">?</span> <span class="p">=</span> <span class="k">null</span>
+        <span class="kd">var</span> <span class="py">result</span><span class="p">:</span> <span class="nc">String</span> <span class="p">=</span> <span class="s">""</span>
+        <span class="k">try</span> <span class="p">{</span>
+            <span class="n">process</span> <span class="p">=</span> <span class="nc">Runtime</span><span class="p">.</span><span class="nf">getRuntime</span><span class="p">().</span><span class="nf">exec</span><span class="p">(</span><span class="s">"su"</span><span class="p">)</span>
+            <span class="n">os</span> <span class="p">=</span> <span class="nc">DataOutputStream</span><span class="p">(</span><span class="n">process</span><span class="p">.</span><span class="n">outputStream</span><span class="p">)</span>
+            <span class="n">ls</span> <span class="p">=</span> <span class="nc">DataInputStream</span><span class="p">(</span><span class="n">process</span><span class="p">.</span><span class="n">inputStream</span><span class="p">)</span>
+            <span class="n">os</span><span class="p">.</span><span class="nf">writeBytes</span><span class="p">(</span><span class="n">cmd</span> <span class="p">+</span> <span class="s">"\n"</span><span class="p">)</span>
+            <span class="n">os</span><span class="p">.</span><span class="nf">writeBytes</span><span class="p">(</span><span class="s">"exit\n"</span><span class="p">)</span>
+            <span class="n">os</span><span class="p">.</span><span class="nf">flush</span><span class="p">()</span>
+            <span class="kd">var</span> <span class="py">line</span> <span class="p">=</span> <span class="n">ls</span><span class="p">.</span><span class="nf">readLine</span><span class="p">()</span>
+            <span class="k">while</span> <span class="p">(</span><span class="n">line</span> <span class="p">!=</span> <span class="k">null</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">result</span> <span class="p">+=</span> <span class="n">line</span>
+                <span class="n">line</span> <span class="p">=</span> <span class="n">ls</span><span class="p">.</span><span class="nf">readLine</span><span class="p">()</span>
+            <span class="p">}</span>
+            <span class="n">process</span><span class="p">.</span><span class="nf">waitFor</span><span class="p">()</span>
+        <span class="p">}</span> <span class="k">catch</span> <span class="p">(</span><span class="n">e</span><span class="p">:</span> <span class="nc">Exception</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nc">Log</span><span class="p">.</span><span class="nf">e</span><span class="p">(</span><span class="s">"varenyzc"</span><span class="p">,</span> <span class="s">"Exception: "</span> <span class="p">+</span> <span class="n">e</span><span class="p">.</span><span class="nf">toString</span><span class="p">())</span>
+        <span class="p">}</span> <span class="k">finally</span> <span class="p">{</span>
+            <span class="k">try</span> <span class="p">{</span>
+                <span class="n">os</span><span class="o">?.</span><span class="nf">close</span><span class="p">()</span>
+                <span class="n">ls</span><span class="o">?.</span><span class="nf">close</span><span class="p">()</span>
+                <span class="n">process</span><span class="o">?.</span><span class="nf">destroy</span><span class="p">()</span>
+            <span class="p">}</span> <span class="k">catch</span> <span class="p">(</span><span class="n">e</span><span class="p">:</span> <span class="nc">Exception</span><span class="p">)</span> <span class="p">{</span>
+                <span class="nc">Log</span><span class="p">.</span><span class="nf">e</span><span class="p">(</span><span class="s">"varenyzc"</span><span class="p">,</span> <span class="s">"close stream exception: "</span> <span class="p">+</span> <span class="n">e</span><span class="p">.</span><span class="nf">toString</span><span class="p">())</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="s">"varenyzc"</span><span class="p">,</span> <span class="s">"result: "</span> <span class="p">+</span> <span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+
+<p>该方法调用后会返回执行命令的结果，结果以String回传。
+通过调用这个方法，可以运行任意的命令，若要获取root权限，调用以下方法即可：</p>
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nf">suCmd</span><span class="p">(</span><span class="s">"chmod 777 $packageCodePath"</span><span class="p">)</span>
+</code></pre></div></div>
+
+:ET

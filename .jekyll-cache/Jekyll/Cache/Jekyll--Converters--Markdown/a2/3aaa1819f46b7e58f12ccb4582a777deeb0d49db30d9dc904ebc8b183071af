@@ -1,0 +1,145 @@
+I"cR<blockquote>
+  <p>近期在做微信数据备份项目时，所探索出来的一些“黑科技”，可以实现静默卸载第三方app、静默清除第三方app的数据、静默降级安装app等功能</p>
+</blockquote>
+
+<p><strong>首先这些都需要系统签名才有这个能力，其次，通过反射去调用系统的隐藏api去实现这些功能。</strong>隐藏api，顾名思义，普通情况下肯定是调用不到的，所以需要一些特殊的方法去调用它。</p>
+
+<h3 id="0反射方法">0.反射方法</h3>
+<p>这里先提供反射的通用方法，后面示例代码将从这里调用，可做一个util工具类使用。</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">class</span> <span class="nc">ReflectUtil</span> <span class="o">{</span>
+    <span class="c1">// 通过反射去调用target类下的实例方法</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="nc">Object</span> <span class="nf">callObjectMethod</span><span class="o">(</span><span class="nc">Object</span> <span class="n">target</span><span class="o">,</span> <span class="nc">String</span> <span class="n">method</span><span class="o">,</span> <span class="nc">Class</span><span class="o">&lt;?&gt;[]</span> <span class="n">parameterTypes</span><span class="o">,</span> <span class="nc">Object</span><span class="o">...</span> <span class="n">values</span><span class="o">)</span>
+            <span class="kd">throws</span> <span class="nc">NoSuchMethodException</span><span class="o">,</span> <span class="nc">SecurityException</span><span class="o">,</span> <span class="nc">IllegalAccessException</span><span class="o">,</span> <span class="nc">IllegalArgumentException</span><span class="o">,</span> <span class="nc">InvocationTargetException</span> <span class="o">{</span>
+        <span class="nc">Class</span><span class="o">&lt;?</span> <span class="kd">extends</span> <span class="nc">Object</span><span class="o">&gt;</span> <span class="n">clazz</span> <span class="o">=</span> <span class="n">target</span><span class="o">.</span><span class="na">getClass</span><span class="o">();</span>
+        <span class="nc">Method</span> <span class="n">declaredMethod</span> <span class="o">=</span> <span class="n">clazz</span><span class="o">.</span><span class="na">getDeclaredMethod</span><span class="o">(</span><span class="n">method</span><span class="o">,</span> <span class="n">parameterTypes</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">declaredMethod</span><span class="o">.</span><span class="na">invoke</span><span class="o">(</span><span class="n">target</span><span class="o">,</span> <span class="n">values</span><span class="o">);</span>
+    <span class="o">}</span>
+
+  <span class="c1">//通过反射去拿到实例对象</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="nc">Object</span> <span class="nf">callStaticObjectMethod</span><span class="o">(</span><span class="nc">Class</span><span class="o">&lt;?&gt;</span> <span class="n">clazz</span><span class="o">,</span> <span class="nc">String</span> <span class="n">method</span><span class="o">,</span> <span class="nc">Class</span><span class="o">&lt;?&gt;[]</span> <span class="n">parameterTypes</span><span class="o">,</span> <span class="nc">Object</span><span class="o">...</span> <span class="n">values</span><span class="o">)</span>
+            <span class="kd">throws</span> <span class="nc">NoSuchMethodException</span><span class="o">,</span> <span class="nc">SecurityException</span><span class="o">,</span> <span class="nc">IllegalAccessException</span><span class="o">,</span> <span class="nc">IllegalArgumentException</span><span class="o">,</span> <span class="nc">InvocationTargetException</span> <span class="o">{</span>
+        <span class="nc">Method</span> <span class="n">declaredMethod</span> <span class="o">=</span> <span class="n">clazz</span><span class="o">.</span><span class="na">getDeclaredMethod</span><span class="o">(</span><span class="n">method</span><span class="o">,</span> <span class="n">parameterTypes</span><span class="o">);</span>
+        <span class="n">declaredMethod</span><span class="o">.</span><span class="na">setAccessible</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
+        <span class="k">return</span> <span class="n">declaredMethod</span><span class="o">.</span><span class="na">invoke</span><span class="o">(</span><span class="kc">null</span><span class="o">,</span> <span class="n">values</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+<hr />
+
+<h3 id="1卸载">1.卸载</h3>
+<p>首先安装卸载的相关逻辑存在系统的framework层，路径为/frameworks/base/services/core/java/com/android/server/pm/PackageManagerService.java，即PMS。
+可以看到该方法所需参数有packageName、versionCode、observer（通过aidl获取该类，后续会提到）、userId、flags。</p>
+
+<p>参数中的IPackageDeleteObserver类，是一个aidl回调通知接口，在源码中找到这个接口：</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="nn">android.content.pm</span><span class="o">;</span>
+
+<span class="cm">/**
+ * API for deletion callbacks from the Package Manager.
+ *
+ * {@hide}
+ */</span>
+<span class="n">oneway</span> <span class="kd">interface</span> <span class="nc">IPackageDeleteObserver</span> <span class="o">{</span>
+    <span class="kt">void</span> <span class="nf">packageDeleted</span><span class="o">(</span><span class="n">in</span> <span class="nc">String</span> <span class="n">packageName</span><span class="o">,</span> <span class="n">in</span> <span class="kt">int</span> <span class="n">returnCode</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>成功生成这个之后，就可以使用反射实现卸载操作了。直接上代码：</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">//卸载操作</span>
+  <span class="k">try</span> <span class="o">{</span>
+          <span class="c1">// 拿到PackageName对应的PackageInfo</span>
+            <span class="nc">PackageInfo</span> <span class="n">packageInfo</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="na">getPackageManager</span><span class="o">().</span><span class="na">getPackageInfo</span><span class="o">(</span><span class="n">yourPackageName</span><span class="o">,</span> <span class="mi">0</span><span class="o">);</span>
+            <span class="nc">PackageDeleteObserver</span> <span class="n">observer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">PackageDeleteObserver</span><span class="o">();</span>
+           <span class="c1">//通过反射拿到IBinder对象</span>
+            <span class="nc">IBinder</span> <span class="n">pgmService</span> <span class="o">=</span> <span class="o">(</span><span class="nc">IBinder</span><span class="o">)</span> <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">callStaticObjectMethod</span><span class="o">(</span><span class="nc">Class</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="s">"android.os.ServiceManager"</span><span class="o">),</span> <span class="s">"getService"</span><span class="o">,</span> <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="nc">String</span><span class="o">.</span><span class="na">class</span><span class="o">},</span> <span class="s">"package"</span><span class="o">);</span>
+           <span class="c1">//通过反射拿到IPackageManager对象 </span>
+           <span class="nc">Object</span> <span class="n">mIPm</span> <span class="o">=</span> <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">callStaticObjectMethod</span><span class="o">(</span><span class="nc">Class</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="s">"android.content.pm.IPackageManager$Stub"</span><span class="o">),</span>
+                    <span class="s">"asInterface"</span><span class="o">,</span> <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="nc">IBinder</span><span class="o">.</span><span class="na">class</span><span class="o">},</span> <span class="n">pgmService</span><span class="o">);</span>
+           <span class="c1">//通过反射使用IPackageManager接口调用到PackageManagerService里的deletePackageAsUser方法</span>
+          <span class="c1">//其中后面两个0，第一个是传入userId，一般传入0即可，不同的系统会有不同的分身userid，第二个是flag，也是传入0即可。</span>
+            <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">callObjectMethod</span><span class="o">(</span><span class="n">mIPm</span><span class="o">,</span> <span class="s">"deletePackageAsUser"</span><span class="o">,</span>
+                    <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="nc">String</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="kt">int</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="nc">IPackageDeleteObserver</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="kt">int</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="kt">int</span><span class="o">.</span><span class="na">class</span><span class="o">},</span>
+                    <span class="n">yourPackageName</span><span class="o">,</span> <span class="n">packageInfo</span><span class="o">.</span><span class="na">versionCode</span><span class="o">,</span> <span class="n">observer</span><span class="o">,</span> <span class="mi">0</span><span class="o">,</span> <span class="mi">0</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Exception</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+            
+        <span class="o">}</span>
+
+
+<span class="c1">//重写IPackageDeleteObserver的packageDeleted方法，监听应用卸载情况</span>
+<span class="kd">private</span> <span class="kd">class</span> <span class="nc">PackageDeleteObserver</span> <span class="kd">extends</span> <span class="nc">IPackageDeleteObserver</span><span class="o">.</span><span class="na">Stub</span> <span class="o">{</span>
+
+        <span class="nd">@Override</span>
+        <span class="kd">public</span> <span class="kt">void</span> <span class="nf">packageDeleted</span><span class="o">(</span><span class="nc">String</span> <span class="n">packageName</span><span class="o">,</span> <span class="kt">int</span> <span class="n">returnCode</span><span class="o">)</span> <span class="o">{</span>
+            <span class="nc">Log</span><span class="o">.</span><span class="na">d</span><span class="o">(</span><span class="no">TAG</span><span class="o">,</span> <span class="s">"packageName:"</span><span class="o">+</span><span class="n">packageName</span><span class="o">+</span><span class="s">" returnCode:"</span><span class="o">+</span><span class="n">returnCode</span><span class="o">);</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">returnCode</span> <span class="o">==</span> <span class="mi">1</span><span class="o">)</span> <span class="o">{</span>
+                <span class="c1">//returnCode = 1即成功</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>然后再在AndroidManifest.xml文件里添加两行权限声明：</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="o">&lt;</span><span class="n">uses</span><span class="o">-</span><span class="n">permission</span> <span class="nl">android:</span><span class="n">name</span><span class="o">=</span><span class="s">"android.permission.DELETE_PACKAGES"</span><span class="o">/&gt;</span>
+    <span class="o">&lt;</span><span class="n">uses</span><span class="o">-</span><span class="n">permission</span> <span class="nl">android:</span><span class="n">name</span><span class="o">=</span><span class="s">"android.permission.INTERACT_ACROSS_USERS_FULL"</span> <span class="o">/&gt;</span>
+</code></pre></div></div>
+<p>即可静默卸载第三方app。</p>
+
+<hr />
+
+<h3 id="2清除数据">2.清除数据</h3>
+<p>可以看到该方法需要传入packageName、IPackageDataObserver、userId等参数，其中IPackageDataObserver同上面的IPackageDeleteObserver接入方法，代码如下：</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="nn">android.content.pm</span><span class="o">;</span>
+
+<span class="cm">/**
+ * API for package data change related callbacks from the Package Manager.
+ * Some usage scenarios include deletion of cache directory, generate
+ * statistics related to code, data, cache usage(TODO)
+ * {@hide}
+ */</span>
+<span class="n">oneway</span> <span class="kd">interface</span> <span class="nc">IPackageDataObserver</span> <span class="o">{</span>
+    <span class="kt">void</span> <span class="nf">onRemoveCompleted</span><span class="o">(</span><span class="n">in</span> <span class="nc">String</span> <span class="n">packageName</span><span class="o">,</span> <span class="kt">boolean</span> <span class="n">succeeded</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></div></div>
+<p>编译后可正常拿到IPackageDataObserver.class，接下来即可通过反射调用clearApplicationUserData方法了，代码如下：</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">//清数据操作</span>
+  <span class="k">try</span> <span class="o">{</span>
+            <span class="nc">DeleteUserDataObserver</span> <span class="n">observer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">DeleteUserDataObserver</span><span class="o">();</span>
+            <span class="nc">IBinder</span> <span class="n">pgmService</span> <span class="o">=</span> <span class="o">(</span><span class="nc">IBinder</span><span class="o">)</span> <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">callStaticObjectMethod</span><span class="o">(</span><span class="nc">Class</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="s">"android.os.ServiceManager"</span><span class="o">),</span>
+                    <span class="s">"getService"</span><span class="o">,</span> <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="nc">String</span><span class="o">.</span><span class="na">class</span><span class="o">},</span> <span class="s">"package"</span><span class="o">);</span>
+            <span class="nc">Object</span> <span class="n">mIPm</span> <span class="o">=</span> <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">callStaticObjectMethod</span><span class="o">(</span><span class="nc">Class</span><span class="o">.</span><span class="na">forName</span><span class="o">(</span><span class="s">"android.content.pm.IPackageManager$Stub"</span><span class="o">),</span>
+                    <span class="s">"asInterface"</span><span class="o">,</span> <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="nc">IBinder</span><span class="o">.</span><span class="na">class</span><span class="o">},</span> <span class="n">pgmService</span><span class="o">);</span>
+            <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">callObjectMethod</span><span class="o">(</span><span class="n">mIPm</span><span class="o">,</span> <span class="s">"clearApplicationUserData"</span><span class="o">,</span>
+                    <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="nc">String</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="nc">IPackageDataObserver</span><span class="o">.</span><span class="na">class</span><span class="o">,</span> <span class="kt">int</span><span class="o">.</span><span class="na">class</span><span class="o">},</span>
+                    <span class="n">yourPackageName</span><span class="o">,</span> <span class="n">observer</span><span class="o">,</span> <span class="mi">0</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="nc">Exception</span> <span class="n">e</span><span class="o">)</span> <span class="o">{</span>
+         
+        <span class="o">}</span>
+
+<span class="c1">//实现IPackageDataObserver</span>
+<span class="kd">private</span> <span class="kd">class</span> <span class="nc">DeleteUserDataObserver</span> <span class="kd">extends</span> <span class="nc">IPackageDataObserver</span><span class="o">.</span><span class="na">Stub</span> <span class="o">{</span>
+        <span class="nd">@Override</span>
+        <span class="kd">public</span> <span class="kt">void</span> <span class="nf">onRemoveCompleted</span><span class="o">(</span><span class="nc">String</span> <span class="n">packageName</span><span class="o">,</span> <span class="kt">boolean</span> <span class="n">succeeded</span><span class="o">)</span> <span class="o">{</span>
+            <span class="nc">Log</span><span class="o">.</span><span class="na">d</span><span class="o">(</span><span class="no">TAG</span><span class="o">,</span> <span class="s">"packageName:"</span> <span class="o">+</span> <span class="n">packageName</span> <span class="o">+</span> <span class="s">" isSuccess:"</span> <span class="o">+</span> <span class="n">succeeded</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<p>此操作需要声明如下权限：</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="o">&lt;</span><span class="n">uses</span><span class="o">-</span><span class="n">permission</span> <span class="nl">android:</span><span class="n">name</span><span class="o">=</span><span class="s">"android.permission.CLEAR_APP_USER_DATA"</span> <span class="o">/&gt;</span>
+</code></pre></div></div>
+
+<hr />
+
+<h3 id="3降级安装">3.降级安装</h3>
+<p>可以看到这同样是一个hide的api，同样需要用反射去调用。在安装过程中拿到SessionParams的实例对象，然后使用反射调用上述方法，传入true，即可实现降级安装，具体安装流程可参考其他博客，这里给出反射代码：</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">PackageInstaller</span><span class="o">.</span><span class="na">SessionParams</span> <span class="n">sp</span> <span class="o">=</span>
+                    <span class="k">new</span> <span class="nc">PackageInstaller</span><span class="o">.</span><span class="na">SessionParams</span><span class="o">(</span><span class="nc">PackageInstaller</span><span class="o">.</span><span class="na">SessionParams</span><span class="o">.</span><span class="na">MODE_FULL_INSTALL</span><span class="o">);</span>
+            <span class="nc">ReflectUtil</span><span class="o">.</span><span class="na">callObjectMethod</span><span class="o">(</span><span class="n">sp</span><span class="o">,</span> <span class="s">"setRequestDowngrade"</span><span class="o">,</span>
+                    <span class="k">new</span> <span class="nc">Class</span><span class="o">[]{</span><span class="kt">boolean</span><span class="o">.</span><span class="na">class</span><span class="o">},</span> <span class="kc">true</span><span class="o">);</span>
+</code></pre></div></div>
+
+<hr />
+
+<h3 id="4总结">4.总结</h3>
+<p><strong>源码是最好的老师</strong>，当有卡壳的地方时，看源码往往能解决99%的问题。例如在静默卸载过程中，我们app已经成功调用了反射方法，且没有catch到异常，但是一直没实现效果，且observer中没有打印出东西，后面看了miui的源码，发现在miui的framework层设置了一个白名单，只有白名单内的app有权限去调用卸载方法，于是在白名单中增加了我们的app，编译后即可正常实现效果。</p>
+
+:ET

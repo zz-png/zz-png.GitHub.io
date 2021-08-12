@@ -4,11 +4,13 @@ title: 关于
 reward: false
 ---
 
-### Minimalism
+### 欢迎来到保安的博客
 
 ---
 
-[Minimalism] 是一款基于 [Jekyll] 为极简主义者打造的极简主题。
+<center><img src="https://zz-png.github.io/assets/img/avatar.webp" width="200" height="200"/></center>
 
-[Minimalism]: https://github.com/showzeng/Minimalism
-[Jekyll]: https://jekyllrb.com/
+<center><p style="font-size='16px' font-style='bold'">这里记录我的学习笔记</p></center>
+
+<center><p style="font-size='16px' font-style='bold'">我是一名保安，保卫一方平安</p></center>
+<center><p style="font-size='16px' font-style='bold'">喜欢业主小王，爱吃小熊饼干</p></center>
